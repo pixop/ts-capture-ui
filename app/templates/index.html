@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TS Capture UI - {{ instance_name }}</title>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+    <div class="container">
+        <h1>TS Capture UI &mdash; {{ instance_name }}</h1>
+        <p class="utc-clock"><strong>UTC now:</strong> <span id="utc-clock">-</span></p>
+        <p class="subtitle">Raw MPEG-TS snippet capture and lightweight preview.</p>
+
+        <section class="status-box config-box">
+            <h2>Instance Configuration</h2>
+            <p><strong>Instance:</strong> {{ instance_name }}</p>
+            <p><strong>Capture directory:</strong> {{ capture_dir }}</p>
+            <p><strong>Default input URL:</strong> {{ default_input_url }}</p>
+            <p><strong>Relay preview URL:</strong> {{ relay_preview_url }}</p>
+            <p><strong>Relay capture URL:</strong> {{ relay_capture_url }}</p>
+        </section>
+
+        <div id="flash-message" class="message" {% if not msg %}style="display: none;"{% endif %}>{{ msg }}</div>
+
+        <section class="status-box">
+            <h2>Status</h2>
+            <div id="capture-status">
+                <p><strong>Capture state:</strong> <span id="capture-state-text">{{ capture_status }}</span></p>
+                <p><strong>Current recording file:</strong> <span id="current-recording-file">{{ manual_capture_file or "None" }}</span></p>
+                <div id="active-capture-details" class="muted">No active captures.</div>
+                <p><strong>Preview status:</strong> <span id="preview-status-text">{{ preview_status }}</span></p>
+                <p><strong>Relay status:</strong> <span id="relay-status-text">{{ relay_status }}</span></p>
+            </div>
+        </section>
+
+        <section class="controls">
+            <h2>Relay / Fanout</h2>
+            <p><strong>Relay input URL:</strong> {{ relay_input_url if relay_running else "-" }}</p>
+            <p><strong>Preview relay URL:</strong> {{ relay_preview_url }}</p>
+            <p><strong>Capture relay URL:</strong> {{ relay_capture_url }}</p>
+
+            <form action="/relay/start" method="post" class="form-grid">
+                <label for="relay-input-url">Relay input URL</label>
+                <input
+                    id="relay-input-url"
+                    name="input_url"
+                    type="text"
+                    value="{{ relay_form_input_url }}"
+                    required
+                />
+                <span></span>
+                <div class="capture-actions-row">
+                    <button type="submit">Start relay</button>
+                    <button type="submit" formaction="/relay/stop" class="danger">Stop relay</button>
+                </div>
+            </form>
+        </section>
+
+        <section class="controls">
+            <h2>Capture Controls</h2>
+            <form action="/capture-fixed" method="post" class="form-grid">
+                <label for="input-url">Input URL</label>
+                <input
+                    id="input-url"
+                    name="input_url"
+                    type="text"
+                    value="{{ default_input_url }}"
+                    required
+                />
+
+                <label for="capture-duration">Duration (seconds)</label>
+                <input
+                    id="capture-duration"
+                    name="duration"
+                    type="number"
+                    min="1"
+                    max="3600"
+                    value="60"
+                    required
+                />
+
+                <label for="capture-use-relay">Use relay for capture</label>
+                <input
+                    id="capture-use-relay"
+                    name="use_relay"
+                    type="checkbox"
+                    {% if relay_running %}checked{% endif %}
+                />
+                <span></span>
+                <div class="capture-actions-row">
+                    <button type="submit">Capture fixed-duration snippet</button>
+                    <button type="submit" formaction="/manual/start">Start manual capture</button>
+                    <button type="submit" formaction="/manual/stop" class="danger">Stop manual capture</button>
+                </div>
+            </form>
+        </section>
+
+        <section class="controls">
+            <h2>Preview Controls</h2>
+            <form action="/preview/start" method="post" class="inline-form">
+                <input class="sync-input-url" name="input_url" type="hidden" value="{{ default_input_url }}" />
+                <label>
+                    <input name="use_relay" type="checkbox" {% if relay_running %}checked{% endif %} />
+                    Use relay
+                </label>
+                <button type="submit">Start preview</button>
+            </form>
+            <form action="/preview/stop" method="post" class="inline-form">
+                <button type="submit" class="danger">Stop preview</button>
+            </form>
+        </section>
+
+        <section class="preview-box">
+            <h2>Latest Preview Thumbnail</h2>
+            <p class="muted"><strong>Last updated (UTC):</strong> <span id="preview-updated-utc">{{ preview_last_updated_utc }}</span></p>
+            {% if preview_exists %}
+            <img
+                id="preview-image"
+                src="/preview.jpg?t={{ preview_cache_buster }}"
+                alt="preview thumbnail"
+            />
+            {% else %}
+            <p class="muted">preview unavailable</p>
+            {% endif %}
+        </section>
+
+        <section class="capture-table">
+            <h2>Captured Files</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Preview</th>
+                        <th>Filename</th>
+                        <th>Size (MB)</th>
+                        <th>Modified</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="captures-table-body">
+                    {% if captures %}
+                        {% for item in captures %}
+                        <tr>
+                            <td>
+                                {% if item.has_thumbnail %}
+                                <div class="thumb-wrap">
+                                    <img class="thumb-small" src="{{ item.small_thumbnail_url }}" alt="thumbnail for {{ item.filename }}" />
+                                    <div class="thumb-popover">
+                                        <img src="{{ item.large_thumbnail_url }}" alt="large thumbnail for {{ item.filename }}" />
+                                    </div>
+                                </div>
+                                {% else %}
+                                <span class="muted">No thumbnail</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ item.filename }}</td>
+                            <td>{{ item.size_mb }}</td>
+                            <td>{{ item.modified }}</td>
+                            <td>
+                                <a class="button-link" href="{{ item.download_url }}">Download</a>
+                                <a class="button-link secondary" href="/probe/{{ item.filename }}">Probe</a>
+                                <form action="/thumbnails/regenerate/{{ item.filename }}" method="post" class="inline-form inline-delete">
+                                    <button type="submit" class="secondary">Regenerate thumbnails</button>
+                                </form>
+                                <form action="{{ item.delete_url }}" method="post" class="inline-form inline-delete">
+                                    <button type="submit" class="danger">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="5" class="muted">No captures yet.</td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </section>
+
+        <section class="capture-table scheduler-table">
+            <h2>Mini Scheduler</h2>
+            <form id="schedule-create-form" action="/schedules/create" method="post" class="form-grid">
+                <label for="schedule-name">Schedule name</label>
+                <input id="schedule-name" name="name" type="text" required />
+
+                <label for="schedule-input-url">Input URL</label>
+                <input
+                    id="schedule-input-url"
+                    name="input_url"
+                    type="text"
+                    value="{{ default_input_url }}"
+                    required
+                />
+
+                <label for="schedule-duration">Duration (seconds)</label>
+                <input
+                    id="schedule-duration"
+                    name="duration_seconds"
+                    type="number"
+                    min="1"
+                    max="3600"
+                    value="60"
+                    required
+                />
+
+                <label for="schedule-interval">Every N minutes</label>
+                <input
+                    id="schedule-interval"
+                    name="interval_minutes"
+                    type="number"
+                    min="1"
+                    max="1440"
+                    value="30"
+                    required
+                />
+
+                <label for="schedule-enabled">Enabled</label>
+                <input id="schedule-enabled" name="enabled" type="checkbox" checked />
+
+                <label for="schedule-use-relay">Use relay</label>
+                <div>
+                    <input name="use_relay_present" type="hidden" value="1" />
+                    <input id="schedule-use-relay" name="use_relay" type="checkbox" {% if relay_running %}checked{% endif %} />
+                </div>
+
+                <span></span>
+                <div class="capture-actions-row">
+                    <button type="submit">Create schedule</button>
+                </div>
+            </form>
+
+            <table class="scheduler-table-grid">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Input URL</th>
+                        <th>Duration</th>
+                        <th>Interval</th>
+                        <th>Use relay</th>
+                        <th>Status</th>
+                        <th>Last run UTC</th>
+                        <th>Last output file</th>
+                        <th>Last error</th>
+                        <th>Delayed start UTC</th>
+                        <th>Delayed stop UTC</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="schedules-table-body">
+                    {% if schedules %}
+                        {% for item in schedules %}
+                        <tr>
+                            <td>{{ item.name }}</td>
+                            <td class="scheduler-col-input">{{ item.input_url }}</td>
+                            <td>{{ item.duration_seconds }}s</td>
+                            <td>{{ item.interval_minutes }}m</td>
+                            <td>{{ "yes" if item.use_relay else "no" }}</td>
+                            <td>{{ "enabled" if item.enabled else "disabled" }}</td>
+                            <td class="scheduler-col-last-run">{{ item.last_run_utc or "-" }}</td>
+                            <td class="scheduler-col-last-output">
+                                {% if item.last_output_file %}
+                                <a class="button-link" href="/download/{{ item.last_output_file }}">{{ item.last_output_file }}</a>
+                                {% else %}
+                                -
+                                {% endif %}
+                            </td>
+                            <td class="scheduler-col-error">{{ item.last_error or "-" }}</td>
+                            <td class="scheduler-col-delay">
+                                <div class="delay-existing">{{ item.delayed_enable_at_utc or "-" }}</div>
+                                <form action="/schedules/delayed-enable/{{ item.id }}" method="post" class="scheduler-delay-form">
+                                    <input
+                                        type="datetime-local"
+                                        name="run_at_utc"
+                                        value="{{ item.delayed_enable_input_utc }}"
+                                        required
+                                    />
+                                    <button type="submit" class="secondary">Set start</button>
+                                </form>
+                                <div class="muted">Pauses interval runs now, then starts a capture at this UTC time.</div>
+                                {% if item.delayed_enable_at_utc %}
+                                <form action="/schedules/clear-delayed-enable/{{ item.id }}" method="post" class="inline-form inline-no-margin">
+                                    <button type="submit" class="secondary">Clear</button>
+                                </form>
+                                {% endif %}
+                            </td>
+                            <td class="scheduler-col-delay">
+                                <div class="delay-existing">{{ item.delayed_disable_at_utc or "-" }}</div>
+                                <form action="/schedules/delayed-disable/{{ item.id }}" method="post" class="scheduler-delay-form">
+                                    <input
+                                        type="datetime-local"
+                                        name="run_at_utc"
+                                        value="{{ item.delayed_disable_input_utc }}"
+                                        required
+                                    />
+                                    <button type="submit" class="secondary">Set stop</button>
+                                </form>
+                                {% if item.delayed_disable_at_utc %}
+                                <form action="/schedules/clear-delayed-disable/{{ item.id }}" method="post" class="inline-form inline-no-margin">
+                                    <button type="submit" class="secondary">Clear</button>
+                                </form>
+                                {% endif %}
+                            </td>
+                            <td class="scheduler-col-actions">
+                                <form action="/schedules/run-now/{{ item.id }}" method="post" class="inline-form inline-no-margin">
+                                    <button type="submit">Run now</button>
+                                </form>
+                                {% if item.enabled %}
+                                <form action="/schedules/disable/{{ item.id }}" method="post" class="inline-form inline-no-margin">
+                                    <button type="submit" class="secondary">Disable</button>
+                                </form>
+                                {% else %}
+                                <form action="/schedules/enable/{{ item.id }}" method="post" class="inline-form inline-no-margin">
+                                    <button type="submit" class="secondary">Enable</button>
+                                </form>
+                                {% endif %}
+                                <form action="/schedules/delete/{{ item.id }}" method="post" class="inline-form inline-no-margin">
+                                    <button type="submit" class="danger">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="12" class="muted">No schedules yet.</td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+            <p class="muted">Delayed start/stop values are interpreted as UTC.</p>
+        </section>
+    </div>
+
+    <script>
+        const flashMessage = document.getElementById("flash-message");
+        function setFlashMessage(text) {
+            if (!flashMessage) {
+                return;
+            }
+            if (text && String(text).trim()) {
+                flashMessage.textContent = String(text);
+                flashMessage.style.display = "block";
+            } else {
+                flashMessage.textContent = "";
+                flashMessage.style.display = "none";
+            }
+        }
+
+        const utcClock = document.getElementById("utc-clock");
+        const previewUpdatedUtc = document.getElementById("preview-updated-utc");
+        function formatNowUtc() {
+            const now = new Date();
+            const yyyy = now.getUTCFullYear();
+            const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
+            const dd = String(now.getUTCDate()).padStart(2, "0");
+            const hh = String(now.getUTCHours()).padStart(2, "0");
+            const min = String(now.getUTCMinutes()).padStart(2, "0");
+            const ss = String(now.getUTCSeconds()).padStart(2, "0");
+            return `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss} UTC`;
+        }
+
+        function updateUtcClock() {
+            if (!utcClock) {
+                return;
+            }
+            utcClock.textContent = formatNowUtc();
+        }
+        updateUtcClock();
+        setInterval(updateUtcClock, 1000);
+
+        const inputUrl = document.getElementById("input-url");
+        const hiddenInputUrls = document.querySelectorAll(".sync-input-url");
+        function syncInputUrls() {
+            hiddenInputUrls.forEach((item) => {
+                item.value = inputUrl.value;
+            });
+        }
+        syncInputUrls();
+        inputUrl.addEventListener("input", syncInputUrls);
+
+        const previewImage = document.getElementById("preview-image");
+
+        const capturesTableBody = document.getElementById("captures-table-body");
+        const schedulesTableBody = document.getElementById("schedules-table-body");
+        const scheduleCreateForm = document.getElementById("schedule-create-form");
+        const captureStateText = document.getElementById("capture-state-text");
+        const currentRecordingFile = document.getElementById("current-recording-file");
+        const activeCaptureDetails = document.getElementById("active-capture-details");
+        const previewStatusText = document.getElementById("preview-status-text");
+        const relayStatusText = document.getElementById("relay-status-text");
+        let hadActiveCaptures = captureStateText && captureStateText.textContent.trim() === "recording";
+        let previewRunning = previewStatusText && previewStatusText.textContent.trim() === "running";
+        let previewObjectUrl = null;
+
+        async function refreshPreviewImage() {
+            if (!previewImage || !previewRunning) {
+                return;
+            }
+            try {
+                const response = await fetch("/preview.jpg?t=" + Date.now(), {
+                    cache: "no-store",
+                });
+                if (!response.ok) {
+                    return;
+                }
+                const blob = await response.blob();
+                if (!blob || blob.size === 0) {
+                    return;
+                }
+                const nextObjectUrl = URL.createObjectURL(blob);
+                previewImage.src = nextObjectUrl;
+                if (previewObjectUrl) {
+                    URL.revokeObjectURL(previewObjectUrl);
+                }
+                previewObjectUrl = nextObjectUrl;
+                if (previewUpdatedUtc) {
+                    const serverUpdatedUtc = response.headers.get("X-Preview-Updated-UTC");
+                    if (serverUpdatedUtc && serverUpdatedUtc.trim()) {
+                        previewUpdatedUtc.textContent = serverUpdatedUtc;
+                    }
+                }
+            } catch (error) {
+                // Ignore transient preview refresh errors and keep current UI.
+            }
+        }
+
+        if (previewImage) {
+            setInterval(refreshPreviewImage, 2000);
+        }
+
+        function escapeHtml(value) {
+            const div = document.createElement("div");
+            div.textContent = value == null ? "" : String(value);
+            return div.innerHTML;
+        }
+
+        function renderCaptures(captures) {
+            if (!capturesTableBody) {
+                return;
+            }
+            if (!Array.isArray(captures) || captures.length === 0) {
+                capturesTableBody.innerHTML = '<tr><td colspan="5" class="muted">No captures yet.</td></tr>';
+                return;
+            }
+            const rows = captures.map((item) => {
+                const filename = escapeHtml(item.filename || "");
+                const sizeMb = escapeHtml(item.size_mb ?? "");
+                const modified = escapeHtml(item.modified || "");
+                const downloadUrl = escapeHtml(item.download_url || `/download/${item.filename || ""}`);
+                const deleteUrl = escapeHtml(item.delete_url || `/delete/${item.filename || ""}`);
+                const smallThumbUrl = escapeHtml(item.small_thumbnail_url || "");
+                const largeThumbUrl = escapeHtml(item.large_thumbnail_url || "");
+                const hasThumbnail = Boolean(item.has_thumbnail);
+                const previewHtml = hasThumbnail
+                    ? `
+                        <div class="thumb-wrap">
+                            <img class="thumb-small" src="${smallThumbUrl}" alt="thumbnail for ${filename}" />
+                            <div class="thumb-popover">
+                                <img src="${largeThumbUrl}" alt="large thumbnail for ${filename}" />
+                            </div>
+                        </div>
+                    `
+                    : '<span class="muted">No thumbnail</span>';
+                return `
+                    <tr>
+                        <td>${previewHtml}</td>
+                        <td>${filename}</td>
+                        <td>${sizeMb}</td>
+                        <td>${modified}</td>
+                        <td>
+                            <a class="button-link" href="${downloadUrl}">Download</a>
+                            <a class="button-link secondary" href="/probe/${filename}">Probe</a>
+                            <form action="/thumbnails/regenerate/${filename}" method="post" class="inline-form inline-delete">
+                                <button type="submit" class="secondary">Regenerate thumbnails</button>
+                            </form>
+                            <form action="${deleteUrl}" method="post" class="inline-form inline-delete">
+                                <button type="submit" class="danger">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                `;
+            });
+            capturesTableBody.innerHTML = rows.join("");
+        }
+
+        async function submitDeleteFormWithoutReload(form) {
+            try {
+                const response = await fetch(form.action, {
+                    method: "POST",
+                    cache: "no-store",
+                });
+                if (!response.ok) {
+                    setFlashMessage("Delete failed.");
+                    return;
+                }
+
+                let message = "Delete completed.";
+                if (response.url) {
+                    const redirectUrl = new URL(response.url, window.location.origin);
+                    const redirectMessage = redirectUrl.searchParams.get("msg");
+                    if (redirectMessage) {
+                        message = redirectMessage;
+                    }
+                }
+                setFlashMessage(message);
+                await refreshCapturesUi();
+            } catch (error) {
+                setFlashMessage("Delete request failed.");
+            }
+        }
+
+        async function submitScheduleCreateFormWithoutReload(form) {
+            try {
+                const response = await fetch(form.action, {
+                    method: "POST",
+                    body: new FormData(form),
+                    cache: "no-store",
+                });
+                if (!response.ok) {
+                    setFlashMessage("Create schedule failed.");
+                    return;
+                }
+
+                let message = "Schedule created.";
+                if (response.url) {
+                    const redirectUrl = new URL(response.url, window.location.origin);
+                    const redirectMessage = redirectUrl.searchParams.get("msg");
+                    if (redirectMessage) {
+                        message = redirectMessage;
+                    }
+                }
+                setFlashMessage(message);
+                await refreshSchedulesUi(true);
+                const scheduleNameInput = document.getElementById("schedule-name");
+                if (scheduleNameInput instanceof HTMLInputElement) {
+                    scheduleNameInput.value = "";
+                }
+            } catch (error) {
+                setFlashMessage("Create schedule request failed.");
+            }
+        }
+
+        async function submitScheduleDeleteFormWithoutReload(form) {
+            try {
+                const response = await fetch(form.action, {
+                    method: "POST",
+                    cache: "no-store",
+                });
+                if (!response.ok) {
+                    setFlashMessage("Schedule delete failed.");
+                    return;
+                }
+
+                let message = "Schedule delete completed.";
+                if (response.url) {
+                    const redirectUrl = new URL(response.url, window.location.origin);
+                    const redirectMessage = redirectUrl.searchParams.get("msg");
+                    if (redirectMessage) {
+                        message = redirectMessage;
+                    }
+                }
+                setFlashMessage(message);
+                await refreshSchedulesUi(true);
+            } catch (error) {
+                setFlashMessage("Schedule delete request failed.");
+            }
+        }
+
+        function renderSchedules(schedules) {
+            if (!schedulesTableBody) {
+                return;
+            }
+            if (!Array.isArray(schedules) || schedules.length === 0) {
+                schedulesTableBody.innerHTML = '<tr><td colspan="12" class="muted">No schedules yet.</td></tr>';
+                return;
+            }
+            const rows = schedules.map((item) => {
+                const scheduleId = escapeHtml(item.id || "");
+                const scheduleName = escapeHtml(item.name || "");
+                const inputUrl = escapeHtml(item.input_url || "");
+                const durationSeconds = escapeHtml(item.duration_seconds ?? "");
+                const intervalMinutes = escapeHtml(item.interval_minutes ?? "");
+                const useRelay = item.use_relay ? "yes" : "no";
+                const status = item.enabled ? "enabled" : "disabled";
+                const lastRunUtc = escapeHtml(item.last_run_utc || "-");
+                const lastOutputFile = escapeHtml(item.last_output_file || "");
+                const lastError = escapeHtml(item.last_error || "-");
+                const delayedEnableAt = escapeHtml(item.delayed_enable_at_utc || "-");
+                const delayedDisableAt = escapeHtml(item.delayed_disable_at_utc || "-");
+                const delayedEnableInput = escapeHtml(item.delayed_enable_input_utc || "");
+                const delayedDisableInput = escapeHtml(item.delayed_disable_input_utc || "");
+                const enableToggleAction = item.enabled ? "disable" : "enable";
+                const enableToggleLabel = item.enabled ? "Disable" : "Enable";
+
+                const lastOutputHtml = item.last_output_file
+                    ? `<a class="button-link" href="/download/${lastOutputFile}">${lastOutputFile}</a>`
+                    : "-";
+
+                const delayedEnableClearHtml = item.delayed_enable_at_utc
+                    ? `<form action="/schedules/clear-delayed-enable/${scheduleId}" method="post" class="inline-form inline-no-margin">
+                            <button type="submit" class="secondary">Clear</button>
+                       </form>`
+                    : "";
+
+                const delayedDisableClearHtml = item.delayed_disable_at_utc
+                    ? `<form action="/schedules/clear-delayed-disable/${scheduleId}" method="post" class="inline-form inline-no-margin">
+                            <button type="submit" class="secondary">Clear</button>
+                       </form>`
+                    : "";
+
+                return `
+                    <tr>
+                        <td>${scheduleName}</td>
+                        <td class="scheduler-col-input">${inputUrl}</td>
+                        <td>${durationSeconds}s</td>
+                        <td>${intervalMinutes}m</td>
+                        <td>${useRelay}</td>
+                        <td>${status}</td>
+                        <td class="scheduler-col-last-run">${lastRunUtc}</td>
+                        <td class="scheduler-col-last-output">${lastOutputHtml}</td>
+                        <td class="scheduler-col-error">${lastError}</td>
+                        <td class="scheduler-col-delay">
+                            <div class="delay-existing">${delayedEnableAt}</div>
+                            <form action="/schedules/delayed-enable/${scheduleId}" method="post" class="scheduler-delay-form">
+                                <input type="datetime-local" name="run_at_utc" value="${delayedEnableInput}" required />
+                                <button type="submit" class="secondary">Set start</button>
+                            </form>
+                            <div class="muted">Pauses interval runs now, then starts a capture at this UTC time.</div>
+                            ${delayedEnableClearHtml}
+                        </td>
+                        <td class="scheduler-col-delay">
+                            <div class="delay-existing">${delayedDisableAt}</div>
+                            <form action="/schedules/delayed-disable/${scheduleId}" method="post" class="scheduler-delay-form">
+                                <input type="datetime-local" name="run_at_utc" value="${delayedDisableInput}" required />
+                                <button type="submit" class="secondary">Set stop</button>
+                            </form>
+                            ${delayedDisableClearHtml}
+                        </td>
+                        <td class="scheduler-col-actions">
+                            <form action="/schedules/run-now/${scheduleId}" method="post" class="inline-form inline-no-margin">
+                                <button type="submit">Run now</button>
+                            </form>
+                            <form action="/schedules/${enableToggleAction}/${scheduleId}" method="post" class="inline-form inline-no-margin">
+                                <button type="submit" class="secondary">${enableToggleLabel}</button>
+                            </form>
+                            <form action="/schedules/delete/${scheduleId}" method="post" class="inline-form inline-no-margin">
+                                <button type="submit" class="danger">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                `;
+            });
+            schedulesTableBody.innerHTML = rows.join("");
+        }
+
+        async function refreshCapturesUi() {
+            try {
+                const response = await fetch("/api/captures", { cache: "no-store" });
+                if (!response.ok) {
+                    return;
+                }
+                const payload = await response.json();
+                renderCaptures(payload.captures || []);
+            } catch (error) {
+                // Ignore transient refresh errors and keep current UI.
+            }
+        }
+
+        async function refreshSchedulesUi(force = false) {
+            if (!schedulesTableBody) {
+                return;
+            }
+            const focusedElement = document.activeElement;
+            if (!force && focusedElement && focusedElement.closest("#schedules-table-body")) {
+                return;
+            }
+            try {
+                const response = await fetch("/api/schedules", { cache: "no-store" });
+                if (!response.ok) {
+                    return;
+                }
+                const payload = await response.json();
+                renderSchedules(payload.schedules || []);
+            } catch (error) {
+                // Ignore transient refresh errors and keep current UI.
+            }
+        }
+
+        function formatSeconds(value) {
+            if (typeof value !== "number" || !Number.isFinite(value)) {
+                return "-";
+            }
+            return `${Math.max(0, Math.round(value))} s`;
+        }
+
+        function formatBitrate(value) {
+            if (typeof value !== "number" || !Number.isFinite(value)) {
+                return "-";
+            }
+            return `${value.toFixed(1)} Mbps`;
+        }
+
+        function renderStatus(status) {
+            const activeCaptures = Array.isArray(status.active_captures) ? status.active_captures : [];
+            const previousPreviewRunning = previewRunning;
+            if (captureStateText) {
+                captureStateText.textContent = status.capture_state || "idle";
+            }
+            if (previewStatusText) {
+                previewRunning = Boolean(status.preview && status.preview.running);
+                previewStatusText.textContent = previewRunning ? "running" : "stopped";
+            }
+            if (!previousPreviewRunning && previewRunning) {
+                refreshPreviewImage();
+            }
+            if (relayStatusText) {
+                relayStatusText.textContent = status.relay && status.relay.running ? "running" : "stopped";
+            }
+
+            const firstActiveFilename = activeCaptures.length > 0 ? activeCaptures[0].filename : null;
+            if (currentRecordingFile) {
+                currentRecordingFile.textContent = firstActiveFilename || "None";
+            }
+
+            if (!activeCaptureDetails) {
+                return;
+            }
+
+            if (activeCaptures.length === 0) {
+                activeCaptureDetails.innerHTML = "<p class=\"muted\">Idle</p>";
+                return;
+            }
+
+            const chunks = activeCaptures.map((item) => {
+                const expected = Number.isFinite(item.expected_duration_seconds)
+                    ? Math.max(0, Math.round(item.expected_duration_seconds))
+                    : null;
+                const remaining = Number.isFinite(item.remaining_seconds)
+                    ? Math.max(0, Math.round(item.remaining_seconds))
+                    : null;
+                const elapsedSeconds = formatSeconds(item.elapsed_seconds);
+                const expectedText = expected == null ? "" : ` / ${expected} s`;
+                const remainingLine = remaining == null ? "" : `<div><strong>Remaining:</strong> ${remaining} s</div>`;
+                return `
+                    <div class="status-capture-item">
+                        <div><strong>Recording:</strong> ${escapeHtml(item.filename || "-")}</div>
+                        <div><strong>Mode:</strong> ${escapeHtml(item.mode || "-")}</div>
+                        <div><strong>Elapsed:</strong> ${elapsedSeconds}${expectedText}</div>
+                        ${remainingLine}
+                        <div><strong>Size:</strong> ${escapeHtml(item.file_size_human || "0 B")}</div>
+                        <div><strong>Approx bitrate:</strong> ${escapeHtml(formatBitrate(item.approx_bitrate_mbps))}</div>
+                        <div><strong>Started UTC:</strong> ${escapeHtml(item.started_at_utc || "-")}</div>
+                        <div><strong>Input:</strong> ${escapeHtml(item.input_url || "-")}</div>
+                    </div>
+                `;
+            });
+            activeCaptureDetails.innerHTML = chunks.join("");
+        }
+
+        async function refreshStatus() {
+            try {
+                const response = await fetch("/api/status", { cache: "no-store" });
+                if (!response.ok) {
+                    return;
+                }
+                const payload = await response.json();
+                const activeCaptures = Array.isArray(payload.active_captures) ? payload.active_captures : [];
+                renderStatus(payload);
+                if (hadActiveCaptures && activeCaptures.length === 0) {
+                    refreshCapturesUi();
+                    refreshSchedulesUi();
+                }
+                hadActiveCaptures = activeCaptures.length > 0;
+            } catch (error) {
+                // Ignore transient refresh errors and keep current UI.
+            }
+        }
+
+        if (capturesTableBody) {
+            capturesTableBody.addEventListener("submit", (event) => {
+                const target = event.target;
+                if (!(target instanceof HTMLFormElement)) {
+                    return;
+                }
+                const action = target.getAttribute("action") || "";
+                if (!action.startsWith("/delete/")) {
+                    return;
+                }
+                event.preventDefault();
+                submitDeleteFormWithoutReload(target);
+            });
+        }
+
+        if (schedulesTableBody) {
+            schedulesTableBody.addEventListener("submit", (event) => {
+                const target = event.target;
+                if (!(target instanceof HTMLFormElement)) {
+                    return;
+                }
+                const action = target.getAttribute("action") || "";
+                if (!action.startsWith("/schedules/delete/")) {
+                    return;
+                }
+                event.preventDefault();
+                submitScheduleDeleteFormWithoutReload(target);
+            });
+        }
+
+        if (scheduleCreateForm instanceof HTMLFormElement) {
+            scheduleCreateForm.addEventListener("submit", (event) => {
+                event.preventDefault();
+                submitScheduleCreateFormWithoutReload(scheduleCreateForm);
+            });
+        }
+
+        setInterval(refreshCapturesUi, 15000);
+        setInterval(refreshSchedulesUi, 15000);
+        setInterval(refreshStatus, 1000);
+        refreshStatus();
+    </script>
+</body>
+</html>
