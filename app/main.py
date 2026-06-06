@@ -369,7 +369,7 @@ def _generate_thumbnail_with_ffmpeg(capture_path: Path, width: int, output_path:
         "-frames:v",
         "1",
         "-vf",
-        f"scale={width}:-2",
+        f"yadif,scale={width}:-2",
         "-q:v",
         "5",
         str(output_path),
