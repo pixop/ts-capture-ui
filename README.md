@@ -57,10 +57,10 @@ Open: [http://localhost:8080](http://localhost:8080)
 TS_CAPTURE_DIR=/data/captures
 TS_BIND_HOST=0.0.0.0
 TS_BIND_PORT=8080
-TS_DEFAULT_INPUT_URL=udp://0.0.0.0:5000?fifo_size=10000000&overrun_nonfatal=1
+TS_DEFAULT_INPUT_URL="udp://0.0.0.0:5000?fifo_size=10000000&overrun_nonfatal=1"
 
 TS_RELAY_AUTOSTART=0
-TS_RELAY_INPUT_URL=udp://0.0.0.0:5000?fifo_size=10000000&overrun_nonfatal=1
+TS_RELAY_INPUT_URL="udp://0.0.0.0:5000?fifo_size=10000000&overrun_nonfatal=1"
 TS_PREVIEW_AUTOSTART=0
 TS_PREVIEW_USE_RELAY=1
 ```
