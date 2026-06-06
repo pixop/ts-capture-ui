@@ -239,6 +239,17 @@ th {
 .scheduler-table-grid th:nth-child(11) { width: 10%; }
 .scheduler-table-grid th:nth-child(12) { width: 11%; }
 
+/* Keep visible separation between Name and Input URL columns. */
+.scheduler-table-grid th:nth-child(1),
+.scheduler-table-grid td:nth-child(1) {
+    padding-right: 12px;
+}
+
+.scheduler-table-grid th:nth-child(2),
+.scheduler-table-grid td:nth-child(2) {
+    padding-left: 12px;
+}
+
 .scheduler-table-grid .button-link {
     max-width: 100%;
     white-space: normal;
