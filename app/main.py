@@ -188,7 +188,7 @@ def build_preview_command(input_url: str) -> list[str]:
         "-sn",
         "-dn",
         "-vf",
-        "scale=480:-2",
+        "yadif,scale=480:-2",
         "-q:v",
         "5",
         "-update",
