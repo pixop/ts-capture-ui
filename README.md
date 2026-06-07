@@ -13,6 +13,13 @@ Web UI for capturing raw MPEG-TS snippets with `ffmpeg`.
 
 No database and no authentication. Designed for private/internal deployments.
 
+## Screenshots
+
+<img width="1393" height="479" alt="Status" src="https://github.com/user-attachments/assets/96b4ba3c-d78c-4c4b-9312-6b724345496d" />
+<img width="1379" height="739" alt="Control" src="https://github.com/user-attachments/assets/d7e2f514-35d2-422e-9755-6db12247ba51" />
+<img width="1403" height="746" alt="Captures" src="https://github.com/user-attachments/assets/18d95a36-2017-4afc-9e8d-6f5f47cf7160" />
+<img width="1380" height="589" alt="Scheduler" src="https://github.com/user-attachments/assets/ee785105-a2eb-4af8-9832-cbc9b4527682" />
+
 ## Requirements
 
 - Python 3.10+
