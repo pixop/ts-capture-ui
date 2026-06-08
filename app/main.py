@@ -296,8 +296,8 @@ def validate_duration_seconds(duration_seconds: int) -> None:
 
 
 def validate_interval_minutes(interval_minutes: int) -> None:
-    if interval_minutes < 1 or interval_minutes > 1440:
-        raise ValueError("Interval must be between 1 and 1440 minutes.")
+    if interval_minutes < 0 or interval_minutes > 1440:
+        raise ValueError("Interval must be between 0 and 1440 minutes.")
 
 
 def safe_capture_path(filename: str) -> Path:
@@ -693,13 +693,13 @@ def start_fixed_duration_capture(
 
 
 def register_schedule_job(schedule: ScheduleConfig) -> None:
-    if not schedule.enabled:
-        return
     job_id = schedule_job_id(schedule.id)
     with scheduler_lock:
         existing_job = scheduler.get_job(job_id)
         if existing_job is not None:
             scheduler.remove_job(job_id)
+        if not schedule.enabled or schedule.interval_minutes == 0:
+            return
         scheduler.add_job(
             run_scheduled_capture,
             "interval",
@@ -866,6 +866,9 @@ def run_delayed_enable(schedule_id: str) -> None:
     # Delayed start should begin capture at the delayed timestamp,
     # not wait for the first interval boundary.
     start_scheduled_capture(schedule)
+    if schedule.interval_minutes == 0:
+        # Interval 0 means one-shot when delayed start fires.
+        update_schedule(schedule_id, enabled=False)
 
 
 def run_delayed_disable(schedule_id: str) -> None:
